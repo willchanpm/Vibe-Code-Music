@@ -15,7 +15,7 @@ const PREVIEW_COLORS: InitialColors = { r: 0.6, g: 0.75, b: 1.0 };
  * Product name shown in the sidebar header. The browser tab title lives in `index.html` — keep both in sync
  * if you rename the app.
  */
-const APP_NAME = 'PageScore';
+const APP_NAME = 'Page Score';
 
 /** Mirrors `book` from POST /api/ambient — Open Library catalog result (cover + snippet prove which title we matched). */
 type BookInfo = {
