@@ -14,7 +14,7 @@ const OPENAI_KEY = process.env.OPENAI_API_KEY;
 // dotenv only loads `.env` by default — not `.env.example`. If the key is "set" in .env.example only, the API will not see it.
 if (!ELEVENLABS_KEY) {
   console.warn(
-    '[vibe-code-music] ELEVENLABS_API_KEY is missing. Copy .env.example to .env in the project root and add your key.',
+    '[page-score] ELEVENLABS_API_KEY is missing. Copy .env.example to .env in the project root and add your key.',
   );
 }
 
@@ -31,7 +31,8 @@ const audioCache = new Map<
   }
 >();
 
-const PROMPT_VERSION = '1';
+// Bump when GPT/Open Library shaping changes so cached audio isn’t stale vs new prompts.
+const PROMPT_VERSION = '2';
 
 type GptResult = {
   ambientPrompt: string;
@@ -56,6 +57,14 @@ type BookLookupResult = {
   openLibraryUrl: string | null;
   /** Set when the HTTP call failed so you know lookup did not run normally. */
   lookupError: string | null;
+  /** Subject / shelf tags from search + work record — used for theme-aware music prompts. */
+  themes: string[];
+  /** Publication year from search when present. */
+  firstPublishYear: number | null;
+  /** First line of the book when Open Library has it — tone hint for GPT (not shown separately if same as summary). */
+  openingLine: string | null;
+  /** Longer work-level description when the `/works/...` record has one — richer than search alone. */
+  descriptionSnippet: string | null;
 };
 
 type OlSearchDoc = {
@@ -83,14 +92,37 @@ function fallbackPrompt(title: string, wantLyrics: boolean): GptResult {
   };
 }
 
-/** Build the user message for GPT: include author + catalog snippet when we have them so the model “knows” the book. */
+/**
+ * Build a structured user message for GPT: themes, synopsis, and opening line give enough substance
+ * to translate *ideas* into *sound* (tempo, instruments, texture) for ElevenLabs — not just the title.
+ */
 function buildGptUserContent(resolvedTitle: string, book: BookLookupResult): string {
-  let line = `Book: "${resolvedTitle}"`;
-  if (book.authors.length) line += ` by ${book.authors.join(', ')}`;
-  if (book.summarySnippet) {
-    line += `. Catalog summary (Open Library): ${book.summarySnippet.slice(0, 320)}`;
+  const parts: string[] = [];
+  parts.push(`**Title:** ${resolvedTitle}`);
+  if (book.authors.length) parts.push(`**Author(s):** ${book.authors.join(', ')}`);
+  if (book.firstPublishYear != null) {
+    parts.push(`**First published (catalog):** ${book.firstPublishYear}`);
   }
-  return line;
+  if (book.themes.length) {
+    // Cap length so the request stays within model context while still listing enough tags.
+    const joined = book.themes.slice(0, 18).join(', ');
+    parts.push(`**Themes / catalog tags:** ${joined}`);
+  }
+  if (book.descriptionSnippet) {
+    parts.push(
+      `**Synopsis / about (Open Library — infer mood and setting, do not quote):** ${book.descriptionSnippet.slice(0, 650)}`,
+    );
+  }
+  if (book.openingLine) {
+    parts.push(
+      `**Opening line (tone and voice only — do not quote or paraphrase in the music prompt):** ${book.openingLine.slice(0, 420)}`,
+    );
+  }
+  // Fallback when we only had a minimal catalog note (e.g. year-only match).
+  if (!book.descriptionSnippet && !book.openingLine && book.summarySnippet) {
+    parts.push(`**Catalog note:** ${book.summarySnippet.slice(0, 420)}`);
+  }
+  return parts.join('\n');
 }
 
 /** Optional: ask OpenAI for a richer prompt + RGB for the Three.js wireframe. */
@@ -101,9 +133,22 @@ async function expandWithGpt(
 ): Promise<GptResult> {
   if (!OPENAI_KEY) return fallbackPrompt(resolvedTitle, wantLyrics);
 
+  // System prompt: steer toward ElevenLabs-friendly language (texture, tempo, instruments) from *themes*, not title alone.
   const systemLyrics = wantLyrics
-    ? 'You create short ambient music prompts for reading. Vocals are allowed: soft, sparse singing with short original lyrics that evoke mood only — never quote or summarize copyrighted book text. Return JSON only with keys: ambientPrompt (string, max 400 chars), moodTags (array of 3-6 short strings), suggestedWireframeColor: { r, g, b } each 0-1 for an aesthetic matching the book mood.'
-    : 'You create short instrumental ambient music prompts for reading. When author names or a catalog summary are provided, treat them as identifying the same book — reflect its mood and setting. Return JSON only with keys: ambientPrompt (string, max 400 chars), moodTags (array of 3-6 short strings), suggestedWireframeColor: { r, g, b } each 0-1 for a calm aesthetic matching the book mood. No vocals, no lyrics, no copyrighted text.';
+    ? [
+        'You write a single text prompt for ElevenLabs Music (generative audio) for someone reading a book.',
+        'Use the structured book facts (themes, synopsis, era). Turn abstract ideas into concrete sound: suggested instruments and layers, tempo/energy, emotional color, and atmosphere (e.g. intimate vs vast, warm vs cold).',
+        'Vocals allowed: very soft, sparse singing with short ORIGINAL lyrics that evoke mood only — never quote, name, or closely paraphrase the book’s wording.',
+        'Do not claim an official soundtrack; avoid pasting the book title into the prompt as a marketing line.',
+        'Return JSON only: ambientPrompt (one flowing string, max 450 characters), moodTags (3–6 short strings), suggestedWireframeColor: { r, g, b } each 0–1 matching the emotional palette.',
+      ].join(' ')
+    : [
+        'You write a single text prompt for ElevenLabs Music (instrumental generative audio) for focused reading.',
+        'Use themes, synopsis, and publication era from the user message. Translate themes (e.g. exile, nature, dread, wonder) into sonic choices: instrumentation, texture, tempo, space/reverb, and mood — not just “calm ambient.”',
+        'If the book’s ideas are tense, melancholic, or strange, the music may reflect that while staying listenable and not harsh (still suitable as reading music).',
+        'No vocals, no lyrics, no copyrighted text, no quoting the book.',
+        'Return JSON only: ambientPrompt (one flowing string, max 450 characters), moodTags (3–6 short strings), suggestedWireframeColor: { r, g, b } each 0–1 matching the emotional palette.',
+      ].join(' ');
 
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -145,8 +190,9 @@ async function expandWithGpt(
       return fallbackPrompt(resolvedTitle, wantLyrics);
     }
     const c = parsed.suggestedWireframeColor ?? { r: 0.6, g: 0.75, b: 1 };
+    const trimmed = parsed.ambientPrompt.trim().slice(0, 450);
     return {
-      ambientPrompt: parsed.ambientPrompt,
+      ambientPrompt: trimmed,
       moodTags: Array.isArray(parsed.moodTags) ? parsed.moodTags : [],
       suggestedWireframeColor: {
         r: clamp01(c.r),
@@ -180,18 +226,40 @@ function cleanCatalogSnippet(text: string, maxLen: number): string {
   return s;
 }
 
-/** Second request: full work record often has a richer description than search alone. */
-async function fetchOpenLibraryWorkSnippet(workKey: string): Promise<string | null> {
+/** Dedupe subject strings while keeping first-seen order (search hits before work extras). */
+function dedupeSubjects(list: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const s of list) {
+    const t = s.trim();
+    if (!t || seen.has(t)) continue;
+    seen.add(t);
+    out.push(t);
+  }
+  return out;
+}
+
+/**
+ * Second request: `/works/...` often has a fuller description and a long `subjects` list than search alone.
+ * We merge those with search subjects so GPT sees themes even when there’s no first sentence.
+ */
+async function fetchOpenLibraryWorkExtras(workKey: string): Promise<{
+  descriptionSnippet: string | null;
+  subjects: string[];
+}> {
   const id = workKey.replace(/^\/works\//, '');
   try {
     const res = await fetch(`https://openlibrary.org/works/${id}.json`);
-    if (!res.ok) return null;
-    const w = (await res.json()) as { description?: unknown };
+    if (!res.ok) return { descriptionSnippet: null, subjects: [] };
+    const w = (await res.json()) as { description?: unknown; subjects?: unknown };
     const raw = normalizeOlDescription(w.description);
-    if (!raw) return null;
-    return cleanCatalogSnippet(raw, 320);
+    const descriptionSnippet = raw ? cleanCatalogSnippet(raw, 650) : null;
+    const subjects = Array.isArray(w.subjects)
+      ? w.subjects.filter((x): x is string => typeof x === 'string').map((s) => s.trim())
+      : [];
+    return { descriptionSnippet, subjects: subjects.slice(0, 24) };
   } catch {
-    return null;
+    return { descriptionSnippet: null, subjects: [] };
   }
 }
 
@@ -209,6 +277,10 @@ async function lookupOpenLibrary(query: string): Promise<BookLookupResult> {
     summarySnippet: null,
     openLibraryUrl: null,
     lookupError: null,
+    themes: [],
+    firstPublishYear: null,
+    openingLine: null,
+    descriptionSnippet: null,
   };
 
   const q = query.trim();
@@ -237,17 +309,38 @@ async function lookupOpenLibrary(query: string): Promise<BookLookupResult> {
         : null;
     const openLibraryUrl = doc.key ? `https://openlibrary.org${doc.key}` : null;
 
-    let summarySnippet: string | null = null;
+    const subjectsFromSearch = Array.isArray(doc.subject)
+      ? doc.subject.filter((s): s is string => typeof s === 'string').map((s) => s.trim())
+      : [];
+
+    let descriptionSnippet: string | null = null;
+    let subjectsFromWork: string[] = [];
+    if (doc.key) {
+      const extras = await fetchOpenLibraryWorkExtras(doc.key);
+      descriptionSnippet = extras.descriptionSnippet;
+      subjectsFromWork = extras.subjects;
+    }
+
+    const themes = dedupeSubjects([...subjectsFromSearch, ...subjectsFromWork]).slice(0, 18);
+
+    let openingLine: string | null = null;
     if (Array.isArray(doc.first_sentence) && doc.first_sentence[0]) {
-      summarySnippet = cleanCatalogSnippet(String(doc.first_sentence[0]), 280);
-    } else if (doc.key) {
-      summarySnippet = await fetchOpenLibraryWorkSnippet(doc.key);
+      openingLine = cleanCatalogSnippet(String(doc.first_sentence[0]), 280);
     }
-    if (!summarySnippet && Array.isArray(doc.subject) && doc.subject.length > 0) {
-      summarySnippet = `Themes include: ${doc.subject.slice(0, 5).join(', ')}.`;
-    }
-    if (!summarySnippet && typeof doc.first_publish_year === 'number') {
-      summarySnippet = `First published in ${doc.first_publish_year}.`;
+
+    const firstPublishYear =
+      typeof doc.first_publish_year === 'number' ? doc.first_publish_year : null;
+
+    // One short line for the UI card — opening line is most “human”; else synopsis; else themes/year.
+    let summarySnippet: string | null = null;
+    if (openingLine) {
+      summarySnippet = openingLine;
+    } else if (descriptionSnippet) {
+      summarySnippet = cleanCatalogSnippet(descriptionSnippet, 320);
+    } else if (themes.length > 0) {
+      summarySnippet = `Themes include: ${themes.slice(0, 5).join(', ')}.`;
+    } else if (firstPublishYear != null) {
+      summarySnippet = `First published in ${firstPublishYear}.`;
     }
 
     return {
@@ -259,6 +352,10 @@ async function lookupOpenLibrary(query: string): Promise<BookLookupResult> {
       summarySnippet,
       openLibraryUrl,
       lookupError: null,
+      themes,
+      firstPublishYear,
+      openingLine,
+      descriptionSnippet,
     };
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Unknown error';

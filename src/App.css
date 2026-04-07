@@ -1,7 +1,10 @@
 .app {
   display: grid;
   grid-template-columns: minmax(280px, 380px) 1fr;
+  /* One row fills the viewport so the visualizer column can stretch edge-to-edge (no letterbox bars). */
+  grid-template-rows: 1fr;
   min-height: 100vh;
+  height: 100%;
 }
 
 .panel {
@@ -11,6 +14,15 @@
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Brand block: app name + short tagline at the top of the left panel. */
+.panel__brand {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
 }
 
 .panel h1 {
@@ -18,6 +30,13 @@
   font-size: 1.25rem;
   font-weight: 600;
   letter-spacing: -0.02em;
+}
+
+.panel__tagline {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.35;
+  color: rgba(232, 237, 245, 0.55);
 }
 
 .panel p {
@@ -76,11 +95,6 @@ select:focus {
   color: rgba(232, 237, 245, 0.55);
 }
 
-/* Extra air between the visualizer dropdown and its helper paragraph (was visually tight). */
-.visualizer-block__hint {
-  margin-top: 0.85rem;
-}
-
 /*
  * Native <select> chevrons sit almost on the border. We hide the system arrow (appearance: none)
  * and draw our own SVG so we can place it with `background-position` — inset from the right edge.
@@ -101,9 +115,34 @@ select:focus {
 
 .row {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
+  flex-wrap: nowrap;
+  gap: 0.4rem;
+  align-items: stretch;
+}
+
+/*
+ * Generate / Play / Pause share the sidebar width evenly so the pills never wrap to a second line
+ * (the row used to wrap when pill padding got wider). Each span wraps a button for Bootstrap tooltips.
+ */
+.row > .row__action-wrap {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+}
+
+.row > .row__action-wrap > button {
+  width: 100%;
+  display: inline-flex;
   align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding-left: 0.55rem;
+  padding-right: 0.55rem;
+  font-size: clamp(0.78rem, 0.65rem + 0.5vw, 0.92rem);
+  /* Allow “Generate audio” to wrap to two lines in the narrow column instead of overflowing. */
+  white-space: normal;
+  line-height: 1.2;
+  min-height: 2.45rem;
 }
 
 /* Toggle row: label on the left, switch on the right (replaces plain checkboxes). */
@@ -184,11 +223,17 @@ label.switch-row {
 button {
   cursor: pointer;
   border: none;
-  border-radius: 8px;
-  padding: 0.55rem 1rem;
+  /* Pill shape — matches the rounded “control deck” look of music apps. */
+  border-radius: 9999px;
+  padding: 0.6rem 1.35rem;
   font-size: 0.95rem;
-  font-weight: 500;
-  transition: opacity 0.15s, transform 0.1s;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  transition:
+    opacity 0.15s,
+    transform 0.12s ease,
+    box-shadow 0.15s ease,
+    filter 0.15s ease;
 }
 
 button:disabled {
@@ -196,18 +241,121 @@ button:disabled {
   cursor: not-allowed;
 }
 
+/*
+ * Primary = Generate: light hits the top edge (inset highlight), shadow lifts the control off the panel.
+ * Gradient runs top-left → bottom-right so it reads like a rounded physical key.
+ */
 button.primary {
-  background: linear-gradient(135deg, #4a7cff 0%, #6b4dff 100%);
-  color: #fff;
+  color: #f4f8ff;
+  background: linear-gradient(
+    155deg,
+    #7ca8ff 0%,
+    #4f6dff 38%,
+    #4a3ae8 72%,
+    #3520a8 100%
+  );
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.35) inset,
+    0 -2px 8px rgba(20, 30, 80, 0.55) inset,
+    0 6px 16px rgba(40, 60, 200, 0.42),
+    0 2px 4px rgba(0, 0, 0, 0.4);
 }
 
+button.primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.4) inset,
+    0 -2px 10px rgba(20, 30, 80, 0.5) inset,
+    0 8px 22px rgba(50, 80, 230, 0.5),
+    0 2px 6px rgba(0, 0, 0, 0.35);
+}
+
+/* Play / Pause: frosted metal strip — still reads “raised” vs the flat panel. */
 button.secondary {
-  background: rgba(255, 255, 255, 0.08);
   color: #e8edf5;
+  background: linear-gradient(
+    155deg,
+    rgba(255, 255, 255, 0.2) 0%,
+    rgba(120, 140, 190, 0.18) 45%,
+    rgba(20, 28, 48, 0.85) 100%
+  );
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.22) inset,
+    0 -2px 6px rgba(0, 0, 0, 0.35) inset,
+    0 4px 12px rgba(0, 0, 0, 0.38),
+    0 1px 2px rgba(0, 0, 0, 0.25);
 }
 
+button.secondary:hover:not(:disabled) {
+  filter: brightness(1.12);
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+/*
+ * Play / Pause after a successful generate: brighter “transport” look so they read as live controls,
+ * not the same greyed-out chrome as before you have audio (`button:disabled` still fades the pre-ready state).
+ */
+button.secondary.secondary--ready {
+  color: #f4f8ff;
+  background: linear-gradient(
+    155deg,
+    rgba(140, 210, 255, 0.35) 0%,
+    rgba(90, 130, 255, 0.28) 42%,
+    rgba(28, 38, 82, 0.95) 100%
+  );
+  border: 1px solid rgba(130, 185, 255, 0.65);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.38) inset,
+    0 -2px 8px rgba(0, 20, 60, 0.4) inset,
+    0 0 22px rgba(90, 150, 255, 0.45),
+    0 6px 18px rgba(40, 70, 200, 0.42),
+    0 2px 4px rgba(0, 0, 0, 0.35);
+}
+
+button.secondary.secondary--ready:hover:not(:disabled) {
+  filter: brightness(1.1);
+  border-color: rgba(160, 210, 255, 0.85);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.42) inset,
+    0 -2px 10px rgba(0, 25, 70, 0.35) inset,
+    0 0 28px rgba(110, 170, 255, 0.55),
+    0 8px 22px rgba(50, 90, 230, 0.48),
+    0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+button.secondary.secondary--ready:active:not(:disabled) {
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.2) inset,
+    0 4px 12px rgba(0, 0, 0, 0.5) inset,
+    0 0 16px rgba(80, 140, 255, 0.35),
+    0 2px 4px rgba(0, 0, 0, 0.4);
+}
+
+/* Pressed state: slightly inset so the button feels like it moves into the surface. */
 button:not(:disabled):active {
-  transform: scale(0.98);
+  transform: translateY(1px) scale(0.99);
+}
+
+button.primary:active:not(:disabled) {
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.25) inset,
+    0 3px 12px rgba(15, 25, 70, 0.65) inset,
+    0 2px 6px rgba(30, 50, 160, 0.35),
+    0 1px 2px rgba(0, 0, 0, 0.45);
+}
+
+button.secondary:active:not(:disabled) {
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.12) inset,
+    0 4px 10px rgba(0, 0, 0, 0.45) inset,
+    0 2px 4px rgba(0, 0, 0, 0.35);
+}
+
+button.primary:focus-visible,
+button.secondary:focus-visible {
+  outline: 2px solid rgba(130, 175, 255, 0.75);
+  outline-offset: 3px;
 }
 
 /* Open Library result: cover + snippet so you can confirm the right book was resolved. */
@@ -266,6 +414,11 @@ button:not(:disabled):active {
   color: rgba(232, 237, 245, 0.58);
 }
 
+/* Secondary line: catalog “themes” tags that also feed GPT → ElevenLabs. */
+.book-card__themes {
+  margin-top: 0.35rem;
+}
+
 .book-card__warn {
   margin: 0;
   font-size: 0.78rem;
@@ -305,27 +458,228 @@ button:not(:disabled):active {
 .canvas-wrap {
   position: relative;
   width: 100%;
-  /* ~80% of the pre-shrink layout (full column height was ~100vh; min-height was 320px). */
-  height: min(80vh, 800px);
-  min-height: 256px;
+  /* Fill the grid cell so the WebGL view uses the full column (no black letterbox bars). */
+  height: 100%;
+  min-height: 0;
   background: #000;
-  align-self: center;
+  align-self: stretch;
 }
 
-.canvas-wrap canvas {
+/* Three.js mounts the canvas here only — keeps the “now playing” strip as a sibling so it can sit on top. */
+.canvas-mount {
+  position: absolute;
+  inset: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.canvas-mount canvas {
   display: block;
   width: 100%;
   height: 100%;
 }
 
+/*
+ * Bottom bar over the visualizer: semi-opaque + blur so text stays readable on busy WebGL frames.
+ * `z-index` keeps it above the canvas (canvas is appended after this node but paints underneath).
+ */
+.now-playing {
+  position: absolute;
+  z-index: 2;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 0.65rem 1rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(8, 12, 22, 0.82);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  pointer-events: auto;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .now-playing {
+    animation: nowPlayingIn 0.28s ease-out;
+  }
+}
+
+@keyframes nowPlayingIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.now-playing__inner {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.now-playing__cover {
+  flex-shrink: 0;
+  width: 56px;
+  height: auto;
+  max-height: 84px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.now-playing__text {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: rgba(232, 237, 245, 0.75);
+}
+
+.now-playing__label {
+  margin: 0;
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(150, 190, 255, 0.9);
+}
+
+.now-playing__title {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: rgba(240, 244, 252, 0.96);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.now-playing__authors {
+  margin: 0;
+  color: rgba(232, 237, 245, 0.62);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  overflow: hidden;
+}
+
+.now-playing__snippet {
+  margin: 0;
+  font-size: 0.74rem;
+  color: rgba(232, 237, 245, 0.55);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.now-playing__warn {
+  margin: 0;
+  font-size: 0.72rem;
+  color: rgba(255, 200, 120, 0.95);
+}
+
+.now-playing__link {
+  margin-top: 0.15rem;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: rgba(160, 200, 255, 0.98);
+  text-decoration: none;
+  align-self: flex-start;
+}
+
+.now-playing__link:hover {
+  text-decoration: underline;
+}
+
+.now-playing__link:focus-visible {
+  outline: 2px solid rgba(120, 170, 255, 0.85);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Long prompt text lives here — collapsed by default so the book card sits higher in the sidebar. */
+.meta-details {
+  margin: 0;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.meta-details__summary {
+  cursor: pointer;
+  padding: 0.55rem 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: rgba(200, 210, 230, 0.9);
+  list-style: none;
+}
+
+.meta-details__summary:focus-visible {
+  outline: 2px solid rgba(100, 150, 255, 0.5);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.meta-details__summary::-webkit-details-marker {
+  display: none;
+}
+
+.meta-details__summary::before {
+  content: '';
+  display: inline-block;
+  width: 0.45em;
+  height: 0.45em;
+  margin-right: 0.45em;
+  border-right: 2px solid rgba(200, 210, 230, 0.55);
+  border-bottom: 2px solid rgba(200, 210, 230, 0.55);
+  transform: rotate(-45deg);
+  vertical-align: 0.15em;
+  transition: transform 0.15s ease;
+}
+
+.meta-details[open] .meta-details__summary::before {
+  transform: rotate(45deg);
+  vertical-align: 0.05em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .meta-details__summary::before {
+    transition: none;
+  }
+}
+
+.meta-details .meta {
+  padding: 0 0.75rem 0.75rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
 @media (max-width: 800px) {
   .app {
     grid-template-columns: 1fr;
+    /* Form first, then visualizer grows to fill remaining viewport (~10% more area than fixed 40vh block). */
+    grid-template-rows: auto 1fr;
   }
 
   .canvas-wrap {
-    /* ~80% of the old mobile target (min-height was 40vh; treat ~50vh as a typical block). */
-    height: min(40vh, 640px);
-    min-height: 256px;
+    height: 100%;
+    min-height: min(44vh, 704px);
+  }
+
+  /* Keep the strip readable when the canvas column is short on phones. */
+  .now-playing {
+    padding: 0.5rem 0.65rem;
+  }
+
+  .now-playing__title {
+    font-size: 0.82rem;
   }
 }
