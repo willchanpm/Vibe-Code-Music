@@ -465,7 +465,7 @@ button.secondary:focus-visible {
   align-self: stretch;
 }
 
-/* Three.js mounts the canvas here only — keeps the “now playing” strip as a sibling so it can sit on top. */
+/* Three.js fills this box edge-to-edge. */
 .canvas-mount {
   position: absolute;
   inset: 0;
@@ -477,133 +477,6 @@ button.secondary:focus-visible {
   display: block;
   width: 100%;
   height: 100%;
-}
-
-/*
- * Bottom bar over the visualizer: semi-opaque + blur so text stays readable on busy WebGL frames.
- * `z-index` keeps it above the canvas (canvas is appended after this node but paints underneath).
- */
-.now-playing {
-  position: absolute;
-  z-index: 2;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  padding: 0.65rem 1rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(8, 12, 22, 0.82);
-  -webkit-backdrop-filter: blur(12px);
-  backdrop-filter: blur(12px);
-  pointer-events: auto;
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .now-playing {
-    animation: nowPlayingIn 0.28s ease-out;
-  }
-}
-
-@keyframes nowPlayingIn {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.now-playing__inner {
-  display: flex;
-  gap: 0.75rem;
-  align-items: flex-start;
-  max-width: 720px;
-  margin: 0 auto;
-}
-
-.now-playing__cover {
-  flex-shrink: 0;
-  width: 56px;
-  height: auto;
-  max-height: 84px;
-  object-fit: cover;
-  border-radius: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-}
-
-.now-playing__text {
-  min-width: 0;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  font-size: 0.78rem;
-  line-height: 1.35;
-  color: rgba(232, 237, 245, 0.75);
-}
-
-.now-playing__label {
-  margin: 0;
-  font-size: 0.6rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: rgba(150, 190, 255, 0.9);
-}
-
-.now-playing__title {
-  margin: 0;
-  font-size: 0.88rem;
-  font-weight: 600;
-  color: rgba(240, 244, 252, 0.96);
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow: hidden;
-}
-
-.now-playing__authors {
-  margin: 0;
-  color: rgba(232, 237, 245, 0.62);
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 1;
-  overflow: hidden;
-}
-
-.now-playing__snippet {
-  margin: 0;
-  font-size: 0.74rem;
-  color: rgba(232, 237, 245, 0.55);
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow: hidden;
-}
-
-.now-playing__warn {
-  margin: 0;
-  font-size: 0.72rem;
-  color: rgba(255, 200, 120, 0.95);
-}
-
-.now-playing__link {
-  margin-top: 0.15rem;
-  font-size: 0.72rem;
-  font-weight: 500;
-  color: rgba(160, 200, 255, 0.98);
-  text-decoration: none;
-  align-self: flex-start;
-}
-
-.now-playing__link:hover {
-  text-decoration: underline;
-}
-
-.now-playing__link:focus-visible {
-  outline: 2px solid rgba(120, 170, 255, 0.85);
-  outline-offset: 2px;
-  border-radius: 2px;
 }
 
 /* Long prompt text lives here — collapsed by default so the book card sits higher in the sidebar. */
@@ -672,14 +545,5 @@ button.secondary:focus-visible {
   .canvas-wrap {
     height: 100%;
     min-height: min(44vh, 704px);
-  }
-
-  /* Keep the strip readable when the canvas column is short on phones. */
-  .now-playing {
-    padding: 0.5rem 0.65rem;
-  }
-
-  .now-playing__title {
-    font-size: 0.82rem;
   }
 }

@@ -98,60 +98,6 @@ function SwitchRow({
   );
 }
 
-/**
- * Compact “now playing” strip on the visualizer: cover + title + short snippet so you see which book
- * matched without scrolling the left panel (like Spotify’s bottom bar over album art).
- */
-function BookNowPlayingStrip({ book }: { book: BookInfo }) {
-  const displayTitle = book.matched ? book.resolvedTitle : book.queryTitle;
-
-  return (
-    <aside
-      className="now-playing"
-      role="region"
-      aria-label="Book matched for this track"
-    >
-      <div className="now-playing__inner">
-        {book.coverUrl && (
-          <img
-            className="now-playing__cover"
-            src={book.coverUrl}
-            alt=""
-            width={56}
-            height={84}
-            loading="lazy"
-          />
-        )}
-        <div className="now-playing__text">
-          <p className="now-playing__label">
-            {book.matched ? 'Open Library' : 'Catalog lookup'}
-          </p>
-          <p className="now-playing__title">{displayTitle}</p>
-          {book.authors.length > 0 && (
-            <p className="now-playing__authors">{book.authors.join(', ')}</p>
-          )}
-          {book.summarySnippet && (
-            <p className="now-playing__snippet">{book.summarySnippet}</p>
-          )}
-          {!book.matched && book.lookupError && (
-            <p className="now-playing__warn">{book.lookupError}</p>
-          )}
-          {book.openLibraryUrl && (
-            <a
-              className="now-playing__link"
-              href={book.openLibraryUrl}
-              target="_blank"
-              rel="noreferrer"
-            >
-              View on Open Library
-            </a>
-          )}
-        </div>
-      </div>
-    </aside>
-  );
-}
-
 function App() {
   const [title, setTitle] = useState('');
   const [useGpt, setUseGpt] = useState(true);
@@ -173,10 +119,10 @@ function App() {
   /** Tracks which mode the current `sceneRef` was built with (so “Generate” can recreate only when mode changes). */
   const sceneModeRef = useRef<VisualizerMode | null>(null);
 
-  /** Inner div: only the WebGL canvas is mounted here so we can layer a book strip on top inside `.canvas-wrap`. */
+  /** Inner div: the WebGL canvas mounts here inside `.canvas-wrap` (full-bleed black column). */
   const canvasRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<AmbientVisualizerScene | null>(null);
-  /** After a successful generate, gently scroll the full book card into view in the sidebar (optional aid; overlay is primary). */
+  /** After a successful generate, gently scroll the full book card into view in the sidebar. */
   const sidebarBookRef = useRef<HTMLDivElement>(null);
 
   /** On unmount, release WebGL + audio so dev hot reload does not leak GPU memory. */
@@ -508,7 +454,6 @@ function App() {
       </aside>
 
       <div className="canvas-wrap">
-        {ambient?.book && <BookNowPlayingStrip book={ambient.book} />}
         <div className="canvas-mount" ref={canvasRef} aria-label="3D audio visualizer" />
       </div>
     </div>
