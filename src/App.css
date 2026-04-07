@@ -1,0 +1,132 @@
+.app {
+  display: grid;
+  grid-template-columns: minmax(280px, 380px) 1fr;
+  min-height: 100vh;
+}
+
+.panel {
+  padding: 1.25rem 1.5rem;
+  background: linear-gradient(165deg, #0c1220 0%, #0a0e18 100%);
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.panel h1 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.panel p {
+  margin: 0;
+  font-size: 0.9rem;
+  color: rgba(232, 237, 245, 0.75);
+}
+
+label {
+  display: block;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(232, 237, 245, 0.5);
+  margin-bottom: 0.35rem;
+}
+
+input[type='text'] {
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.35);
+  color: #e8edf5;
+  font-size: 1rem;
+}
+
+input[type='text']::placeholder {
+  color: rgba(232, 237, 245, 0.35);
+}
+
+input[type='text']:focus {
+  outline: 2px solid rgba(100, 150, 255, 0.45);
+  outline-offset: 1px;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  border-radius: 8px;
+  padding: 0.55rem 1rem;
+  font-size: 0.95rem;
+  font-weight: 500;
+  transition: opacity 0.15s, transform 0.1s;
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+button.primary {
+  background: linear-gradient(135deg, #4a7cff 0%, #6b4dff 100%);
+  color: #fff;
+}
+
+button.secondary {
+  background: rgba(255, 255, 255, 0.08);
+  color: #e8edf5;
+}
+
+button:not(:disabled):active {
+  transform: scale(0.98);
+}
+
+.meta {
+  font-size: 0.8rem;
+  color: rgba(232, 237, 245, 0.55);
+  line-height: 1.5;
+}
+
+.meta strong {
+  color: rgba(232, 237, 245, 0.85);
+}
+
+.error {
+  padding: 0.65rem 0.75rem;
+  border-radius: 8px;
+  background: rgba(255, 80, 80, 0.12);
+  border: 1px solid rgba(255, 100, 100, 0.35);
+  color: #ffb4b4;
+  font-size: 0.85rem;
+}
+
+.canvas-wrap {
+  position: relative;
+  min-height: 320px;
+  background: #000;
+}
+
+.canvas-wrap canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+@media (max-width: 800px) {
+  .app {
+    grid-template-columns: 1fr;
+  }
+
+  .canvas-wrap {
+    min-height: 40vh;
+  }
+}
