@@ -111,17 +111,21 @@ void main() {
 }
 `;
 
-/** Particle vertex — based on `particle.vertex.glsl` (per-instance uniforms via InstancedUniformsMesh). */
+/**
+ * Particle vertex — based on `particle.vertex.glsl`.
+ * Per-instance direction + random come from `InstancedBufferAttribute` (`instanceDirection`, `instanceRandom`)
+ * so we do not need the troika `InstancedUniformsMesh` helper (it breaks on newer Three.js builds).
+ */
 export const kekkoParticleVertexShader = /* glsl */ `
 varying float vAlpha;
 varying vec3 vColor;
 
-uniform vec3 uDirection;
-uniform float uRandom;
+attribute vec3 instanceDirection;
+attribute float instanceRandom;
+
 uniform float uTime;
 uniform float uInfluence;
 
-${noiseSimplexGlsl}
 ${paletteFnGlsl}
 
 #define PAL_A vec3(0.5, 0.5, 0.5)
@@ -130,14 +134,12 @@ ${paletteFnGlsl}
 #define PAL_D vec3(0.00, 0.10, 0.20)
 
 void main() {
-  float progress = fract(uTime*0.5*uRandom);
+  float progress = fract(uTime*0.5*instanceRandom);
 
   float alpha = smoothstep(0., .2, progress);
   alpha *= smoothstep(1., .6, progress);
 
-  float n = snoise(position + uTime*0.3);
-
-  vec3 pos = position + uDirection*progress + uDirection*uInfluence*0.3;
+  vec3 pos = position + instanceDirection*progress + instanceDirection*uInfluence*0.3;
 
   vec4 mvPosition = vec4(pos, 1.0);
   mvPosition = instanceMatrix * mvPosition;

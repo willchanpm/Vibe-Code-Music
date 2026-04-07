@@ -39,7 +39,43 @@ type GptResult = {
   suggestedWireframeColor: { r: number; g: number; b: number };
 };
 
-function fallbackPrompt(title: string): GptResult {
+/** What we send to the client so you can see the app matched a real catalog entry (Open Library). */
+type BookLookupResult = {
+  /** True when Open Library returned at least one search hit for your query. */
+  matched: boolean;
+  /** What you typed in the form (echoed back for clarity). */
+  queryTitle: string;
+  /** Canonical title from Open Library (may differ slightly from your spelling). */
+  resolvedTitle: string;
+  authors: string[];
+  /** Medium JPEG from covers.openlibrary.org, or null if none. */
+  coverUrl: string | null;
+  /** Short plain-text blurb: work description, first sentence, subjects, or year — proves which book we mean. */
+  summarySnippet: string | null;
+  /** Link to the work on openlibrary.org (handy for “is this the right edition?”). */
+  openLibraryUrl: string | null;
+  /** Set when the HTTP call failed so you know lookup did not run normally. */
+  lookupError: string | null;
+};
+
+type OlSearchDoc = {
+  title?: string;
+  author_name?: string[];
+  cover_i?: number;
+  key?: string;
+  first_sentence?: string[];
+  subject?: string[];
+  first_publish_year?: number;
+};
+
+function fallbackPrompt(title: string, wantLyrics: boolean): GptResult {
+  if (wantLyrics) {
+    return {
+      ambientPrompt: `Ambient reading music inspired by "${title}". Soft, sparse vocals with gentle original lyrics about mood and atmosphere only — never quote the book. Calm, spacious, suitable for focus.`,
+      moodTags: ['calm', 'reading', 'ambient', 'vocals'],
+      suggestedWireframeColor: { r: 0.65, g: 0.55, b: 0.95 },
+    };
+  }
   return {
     ambientPrompt: `Instrumental ambient reading music inspired by the book "${title}". Calm, spacious, minimal percussion, no vocals, suitable for deep focus while reading.`,
     moodTags: ['calm', 'reading', 'ambient'],
@@ -47,9 +83,27 @@ function fallbackPrompt(title: string): GptResult {
   };
 }
 
+/** Build the user message for GPT: include author + catalog snippet when we have them so the model “knows” the book. */
+function buildGptUserContent(resolvedTitle: string, book: BookLookupResult): string {
+  let line = `Book: "${resolvedTitle}"`;
+  if (book.authors.length) line += ` by ${book.authors.join(', ')}`;
+  if (book.summarySnippet) {
+    line += `. Catalog summary (Open Library): ${book.summarySnippet.slice(0, 320)}`;
+  }
+  return line;
+}
+
 /** Optional: ask OpenAI for a richer prompt + RGB for the Three.js wireframe. */
-async function expandWithGpt(title: string): Promise<GptResult> {
-  if (!OPENAI_KEY) return fallbackPrompt(title);
+async function expandWithGpt(
+  resolvedTitle: string,
+  book: BookLookupResult,
+  wantLyrics: boolean,
+): Promise<GptResult> {
+  if (!OPENAI_KEY) return fallbackPrompt(resolvedTitle, wantLyrics);
+
+  const systemLyrics = wantLyrics
+    ? 'You create short ambient music prompts for reading. Vocals are allowed: soft, sparse singing with short original lyrics that evoke mood only — never quote or summarize copyrighted book text. Return JSON only with keys: ambientPrompt (string, max 400 chars), moodTags (array of 3-6 short strings), suggestedWireframeColor: { r, g, b } each 0-1 for an aesthetic matching the book mood.'
+    : 'You create short instrumental ambient music prompts for reading. When author names or a catalog summary are provided, treat them as identifying the same book — reflect its mood and setting. Return JSON only with keys: ambientPrompt (string, max 400 chars), moodTags (array of 3-6 short strings), suggestedWireframeColor: { r, g, b } each 0-1 for a calm aesthetic matching the book mood. No vocals, no lyrics, no copyrighted text.';
 
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -63,12 +117,11 @@ async function expandWithGpt(title: string): Promise<GptResult> {
       messages: [
         {
           role: 'system',
-          content:
-            'You create short instrumental ambient music prompts for reading. Return JSON only with keys: ambientPrompt (string, max 400 chars), moodTags (array of 3-6 short strings), suggestedWireframeColor: { r, g, b } each 0-1 for a calm aesthetic matching the book mood. No vocals, no lyrics, no copyrighted text.',
+          content: systemLyrics,
         },
         {
           role: 'user',
-          content: `Book title: "${title}".`,
+          content: buildGptUserContent(resolvedTitle, book),
         },
       ],
     }),
@@ -77,19 +130,19 @@ async function expandWithGpt(title: string): Promise<GptResult> {
   if (!res.ok) {
     const errText = await res.text();
     console.warn('OpenAI error, using fallback prompt:', res.status, errText);
-    return fallbackPrompt(title);
+    return fallbackPrompt(resolvedTitle, wantLyrics);
   }
 
   const data = (await res.json()) as {
     choices?: Array<{ message?: { content?: string } }>;
   };
   const raw = data.choices?.[0]?.message?.content;
-  if (!raw) return fallbackPrompt(title);
+  if (!raw) return fallbackPrompt(resolvedTitle, wantLyrics);
 
   try {
     const parsed = JSON.parse(raw) as GptResult;
     if (!parsed.ambientPrompt || typeof parsed.ambientPrompt !== 'string') {
-      return fallbackPrompt(title);
+      return fallbackPrompt(resolvedTitle, wantLyrics);
     }
     const c = parsed.suggestedWireframeColor ?? { r: 0.6, g: 0.75, b: 1 };
     return {
@@ -102,7 +155,114 @@ async function expandWithGpt(title: string): Promise<GptResult> {
       },
     };
   } catch {
-    return fallbackPrompt(title);
+    return fallbackPrompt(resolvedTitle, wantLyrics);
+  }
+}
+
+/** Open Library sometimes stores description as a string, sometimes as { type, value }. */
+function normalizeOlDescription(raw: unknown): string {
+  if (typeof raw === 'string') return raw;
+  if (raw && typeof raw === 'object' && 'value' in raw && typeof (raw as { value: unknown }).value === 'string') {
+    return (raw as { value: string }).value;
+  }
+  return '';
+}
+
+/** Turn long markdown-ish text into a short, readable snippet for the UI + GPT. */
+function cleanCatalogSnippet(text: string, maxLen: number): string {
+  let s = text
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/^>\s*/gm, '')
+    .replace(/^#+\s*/gm, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (s.length > maxLen) s = s.slice(0, maxLen - 1).trimEnd() + '…';
+  return s;
+}
+
+/** Second request: full work record often has a richer description than search alone. */
+async function fetchOpenLibraryWorkSnippet(workKey: string): Promise<string | null> {
+  const id = workKey.replace(/^\/works\//, '');
+  try {
+    const res = await fetch(`https://openlibrary.org/works/${id}.json`);
+    if (!res.ok) return null;
+    const w = (await res.json()) as { description?: unknown };
+    const raw = normalizeOlDescription(w.description);
+    if (!raw) return null;
+    return cleanCatalogSnippet(raw, 320);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Looks up the book in Open Library’s public catalog (no API key).
+ * This is the step that proves we’re not only echoing your string — we resolve title, authors, cover, and a snippet.
+ */
+async function lookupOpenLibrary(query: string): Promise<BookLookupResult> {
+  const base: BookLookupResult = {
+    matched: false,
+    queryTitle: query,
+    resolvedTitle: query.trim(),
+    authors: [],
+    coverUrl: null,
+    summarySnippet: null,
+    openLibraryUrl: null,
+    lookupError: null,
+  };
+
+  const q = query.trim();
+  if (!q) {
+    return { ...base, lookupError: 'Empty title' };
+  }
+
+  try {
+    const url = `https://openlibrary.org/search.json?q=${encodeURIComponent(q)}&limit=1`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      return { ...base, lookupError: `Open Library search failed (HTTP ${res.status})` };
+    }
+
+    const data = (await res.json()) as { docs?: OlSearchDoc[] };
+    const doc = data.docs?.[0];
+    if (!doc?.title) {
+      return { ...base, lookupError: 'No catalog match for this search' };
+    }
+
+    const resolvedTitle = doc.title;
+    const authors = Array.isArray(doc.author_name) ? doc.author_name : [];
+    const coverUrl =
+      typeof doc.cover_i === 'number'
+        ? `https://covers.openlibrary.org/b/id/${doc.cover_i}-M.jpg`
+        : null;
+    const openLibraryUrl = doc.key ? `https://openlibrary.org${doc.key}` : null;
+
+    let summarySnippet: string | null = null;
+    if (Array.isArray(doc.first_sentence) && doc.first_sentence[0]) {
+      summarySnippet = cleanCatalogSnippet(String(doc.first_sentence[0]), 280);
+    } else if (doc.key) {
+      summarySnippet = await fetchOpenLibraryWorkSnippet(doc.key);
+    }
+    if (!summarySnippet && Array.isArray(doc.subject) && doc.subject.length > 0) {
+      summarySnippet = `Themes include: ${doc.subject.slice(0, 5).join(', ')}.`;
+    }
+    if (!summarySnippet && typeof doc.first_publish_year === 'number') {
+      summarySnippet = `First published in ${doc.first_publish_year}.`;
+    }
+
+    return {
+      matched: true,
+      queryTitle: q,
+      resolvedTitle,
+      authors,
+      coverUrl,
+      summarySnippet,
+      openLibraryUrl,
+      lookupError: null,
+    };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Unknown error';
+    return { ...base, lookupError: msg };
   }
 }
 
@@ -112,7 +272,11 @@ function clamp01(n: number): number {
 }
 
 /** Calls ElevenLabs `POST /v1/music` and returns MP3 bytes. */
-async function composeMusic(prompt: string, musicLengthMs: number): Promise<ArrayBuffer> {
+async function composeMusic(
+  prompt: string,
+  musicLengthMs: number,
+  forceInstrumental: boolean,
+): Promise<ArrayBuffer> {
   if (!ELEVENLABS_KEY) {
     throw new Error('ELEVENLABS_API_KEY is not set');
   }
@@ -129,6 +293,8 @@ async function composeMusic(prompt: string, musicLengthMs: number): Promise<Arra
     body: JSON.stringify({
       prompt,
       music_length_ms: musicLengthMs,
+      // ElevenLabs: true = guaranteed instrumental; false = model may add vocals (pairs with our "lyrics" UI toggle).
+      force_instrumental: forceInstrumental,
     }),
   });
 
@@ -140,9 +306,16 @@ async function composeMusic(prompt: string, musicLengthMs: number): Promise<Arra
   return res.arrayBuffer();
 }
 
-function cacheKey(title: string, musicLengthMs: number, useGpt: boolean): string {
+function cacheKey(
+  title: string,
+  musicLengthMs: number,
+  useGpt: boolean,
+  wantLyrics: boolean,
+): string {
   const h = createHash('sha256');
-  h.update(`${PROMPT_VERSION}|${title.trim().toLowerCase()}|${musicLengthMs}|${useGpt ? 'gpt' : 'nogpt'}`);
+  h.update(
+    `${PROMPT_VERSION}|${title.trim().toLowerCase()}|${musicLengthMs}|${useGpt ? 'gpt' : 'nogpt'}|${wantLyrics ? 'lyrics' : 'instr'}`,
+  );
   return h.digest('hex');
 }
 
@@ -155,8 +328,9 @@ app.get('/api/health', (_req, res) => {
 });
 
 /**
- * Body: { title: string, musicLengthMs?: number, useGpt?: boolean, skipCache?: boolean }
- * Returns JSON: { audioBase64, mimeType, promptUsed, moodTags, uRed, uGreen, uBlue }
+ * Body: { title: string, musicLengthMs?: number, useGpt?: boolean, skipCache?: boolean, wantLyrics?: boolean }
+ * Returns JSON: { audioBase64, mimeType, promptUsed, moodTags, uRed, uGreen, uBlue, book, cached? }
+ * `book` comes from Open Library (real catalog lookup). Music still uses your title string if no match.
  */
 app.post('/api/ambient', async (req, res) => {
   try {
@@ -166,6 +340,10 @@ app.post('/api/ambient', async (req, res) => {
       return;
     }
 
+    // Always hit Open Library first so the response can show cover + snippet (proves which book we resolved).
+    const book = await lookupOpenLibrary(title);
+    const promptTitle = book.matched ? book.resolvedTitle : title;
+
     const musicLengthMs = Math.min(
       300_000,
       Math.max(10_000, Number(req.body?.musicLengthMs) || 120_000),
@@ -174,8 +352,10 @@ app.post('/api/ambient', async (req, res) => {
     const clientWantsGpt = req.body?.useGpt !== false;
     const useGpt = clientWantsGpt && Boolean(OPENAI_KEY);
     const skipCache = Boolean(req.body?.skipCache);
+    // When false (default): instrumental only via ElevenLabs `force_instrumental`. When true: vocals/lyrics allowed.
+    const wantLyrics = Boolean(req.body?.wantLyrics);
 
-    const key = cacheKey(title, musicLengthMs, useGpt);
+    const key = cacheKey(title, musicLengthMs, useGpt, wantLyrics);
     if (!skipCache && audioCache.has(key)) {
       const hit = audioCache.get(key)!;
       res.json({
@@ -187,13 +367,16 @@ app.post('/api/ambient', async (req, res) => {
         uGreen: hit.uGreen,
         uBlue: hit.uBlue,
         cached: true,
+        book,
       });
       return;
     }
 
-    const gpt = useGpt ? await expandWithGpt(title) : fallbackPrompt(title);
+    const gpt = useGpt
+      ? await expandWithGpt(promptTitle, book, wantLyrics)
+      : fallbackPrompt(promptTitle, wantLyrics);
     const promptUsed = gpt.ambientPrompt;
-    const buf = await composeMusic(promptUsed, musicLengthMs);
+    const buf = await composeMusic(promptUsed, musicLengthMs, !wantLyrics);
     const audioBase64 = Buffer.from(buf).toString('base64');
 
     const { r, g, b } = gpt.suggestedWireframeColor;
@@ -206,6 +389,7 @@ app.post('/api/ambient', async (req, res) => {
       uGreen: g,
       uBlue: b,
       cached: false,
+      book,
     };
 
     audioCache.set(key, {

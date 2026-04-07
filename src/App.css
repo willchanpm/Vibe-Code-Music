@@ -54,11 +54,131 @@ input[type='text']:focus {
   outline-offset: 1px;
 }
 
+select {
+  width: 100%;
+  padding: 0.55rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.35);
+  color: #e8edf5;
+  font-size: 0.95rem;
+}
+
+select:focus {
+  outline: 2px solid rgba(100, 150, 255, 0.45);
+  outline-offset: 1px;
+}
+
+.hint {
+  margin: 0.5rem 0 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: rgba(232, 237, 245, 0.55);
+}
+
+/* Extra air between the visualizer dropdown and its helper paragraph (was visually tight). */
+.visualizer-block__hint {
+  margin-top: 0.85rem;
+}
+
+/*
+ * Native <select> chevrons sit almost on the border. We hide the system arrow (appearance: none)
+ * and draw our own SVG so we can place it with `background-position` — inset from the right edge.
+ */
+.visualizer-block select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 2.25rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23c8d0e0' d='M3 4.5L6 7.5 9 4.5z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.9rem center;
+  background-size: 12px 12px;
+}
+
+.hint a {
+  color: rgba(150, 190, 255, 0.95);
+}
+
 .row {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
   align-items: center;
+}
+
+/* Toggle row: label on the left, switch on the right (replaces plain checkboxes). */
+label.switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  cursor: pointer;
+  margin-bottom: 0;
+  font-size: 0.9rem;
+  line-height: 1.35;
+  text-transform: none;
+  letter-spacing: normal;
+  color: rgba(232, 237, 245, 0.88);
+}
+
+.switch-row__text {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Click target for the hidden checkbox — sits on top of the track. */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+.switch__input {
+  position: absolute;
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  cursor: pointer;
+  z-index: 1;
+}
+
+.switch__track {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.switch__input:checked + .switch__track {
+  background: linear-gradient(135deg, #4a7cff 0%, #6b4dff 100%);
+  border-color: transparent;
+}
+
+.switch__thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #f0f4fc;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  transition: transform 0.2s ease;
+}
+
+/* Slide thumb to the right when “on” (track is 44px wide; thumb + padding leaves ~20px travel). */
+.switch__input:checked + .switch__track .switch__thumb {
+  transform: translateX(20px);
+}
+
+.switch__input:focus-visible + .switch__track {
+  outline: 2px solid rgba(100, 150, 255, 0.55);
+  outline-offset: 2px;
 }
 
 button {
@@ -90,6 +210,79 @@ button:not(:disabled):active {
   transform: scale(0.98);
 }
 
+/* Open Library result: cover + snippet so you can confirm the right book was resolved. */
+.book-card {
+  display: flex;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.book-card__cover {
+  flex-shrink: 0;
+  width: 120px;
+  height: auto;
+  max-height: 180px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.book-card__body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: rgba(232, 237, 245, 0.72);
+}
+
+.book-card__label {
+  margin: 0;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(150, 190, 255, 0.85);
+}
+
+.book-card__title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: rgba(240, 244, 252, 0.95);
+}
+
+.book-card__authors {
+  margin: 0;
+  color: rgba(232, 237, 245, 0.65);
+}
+
+.book-card__snippet {
+  margin: 0;
+  font-size: 0.78rem;
+  color: rgba(232, 237, 245, 0.58);
+}
+
+.book-card__warn {
+  margin: 0;
+  font-size: 0.78rem;
+  color: rgba(255, 200, 120, 0.9);
+}
+
+.book-card__link {
+  margin-top: 0.25rem;
+  font-size: 0.78rem;
+  color: rgba(150, 190, 255, 0.95);
+  text-decoration: none;
+}
+
+.book-card__link:hover {
+  text-decoration: underline;
+}
+
 .meta {
   font-size: 0.8rem;
   color: rgba(232, 237, 245, 0.55);
@@ -111,8 +304,12 @@ button:not(:disabled):active {
 
 .canvas-wrap {
   position: relative;
-  min-height: 320px;
+  width: 100%;
+  /* ~80% of the pre-shrink layout (full column height was ~100vh; min-height was 320px). */
+  height: min(80vh, 800px);
+  min-height: 256px;
   background: #000;
+  align-self: center;
 }
 
 .canvas-wrap canvas {
@@ -127,6 +324,8 @@ button:not(:disabled):active {
   }
 
   .canvas-wrap {
-    min-height: 40vh;
+    /* ~80% of the old mobile target (min-height was 40vh; treat ~50vh as a typical block). */
+    height: min(40vh, 640px);
+    min-height: 256px;
   }
 }

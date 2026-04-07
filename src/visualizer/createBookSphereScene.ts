@@ -11,23 +11,11 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 
 import { fragmentShader, vertexShader } from '../shaders/bookBlob';
 
-export type InitialColors = { r: number; g: number; b: number };
+import type { AmbientVisualizerScene, InitialColors } from './visualizerTypes';
 
-export type BookSphereScene = {
-  /** Call after user gesture so the browser allows audio (required policy). */
-  play: () => void;
-  pause: () => void;
-  /** Replace the decoded track (e.g. new book). */
-  setAudioBuffer: (buffer: AudioBuffer) => void;
-  /**
-   * Decode MP3 from base64 using the same AudioContext as playback (avoids context mismatch).
-   */
-  loadAudioFromBase64: (base64: string) => Promise<void>;
-  /** When you generate a new track, GPT may suggest new RGB — sync uniforms + lil-gui. */
-  setWireframeColors: (c: InitialColors) => void;
-  /** Tear down WebGL, listeners, and GUI when React unmounts or hot reloads. */
-  dispose: () => void;
-};
+/** Same shape as `AmbientVisualizerScene` — kept name for existing imports. */
+export type BookSphereScene = AmbientVisualizerScene;
+export type { InitialColors };
 
 function getSize(el: HTMLElement) {
   const r = el.getBoundingClientRect();
@@ -37,7 +25,7 @@ function getSize(el: HTMLElement) {
 export function createBookSphereScene(
   mountEl: HTMLElement,
   initialColors: InitialColors,
-): BookSphereScene {
+): AmbientVisualizerScene {
   const { width, height } = getSize(mountEl);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -112,13 +100,36 @@ export function createBookSphereScene(
   const colorsFolder = gui.addFolder('Wireframe color');
   colorsFolder.add(params, 'red', 0, 1).onChange((v: number) => {
     uniforms.u_red.value = v;
+    colorTarget.r = v;
   });
   colorsFolder.add(params, 'green', 0, 1).onChange((v: number) => {
     uniforms.u_green.value = v;
+    colorTarget.g = v;
   });
   colorsFolder.add(params, 'blue', 0, 1).onChange((v: number) => {
     uniforms.u_blue.value = v;
+    colorTarget.b = v;
   });
+
+  /**
+   * While audio plays, the wireframe slowly drifts toward new random colours (smooth, not strobing).
+   * We pick targets in HSL space so hues stay vivid; `nextColorShuffleAt` schedules the next palette jump.
+   */
+  const colorTarget = { r: initialColors.r, g: initialColors.g, b: initialColors.b };
+  let nextColorShuffleAt = 0;
+  /** After you hit Play, wait a moment before the first random target so the GPT/book colour is visible briefly. */
+  let playColorShufflePrimed = false;
+  const scratchColor = new THREE.Color();
+
+  const pickRandomWireframeTarget = () => {
+    const h = Math.random();
+    const s = 0.38 + Math.random() * 0.48;
+    const l = 0.38 + Math.random() * 0.32;
+    scratchColor.setHSL(h, s, l);
+    colorTarget.r = scratchColor.r;
+    colorTarget.g = scratchColor.g;
+    colorTarget.b = scratchColor.b;
+  };
 
   const setWireframeColors = (c: InitialColors) => {
     uniforms.u_red.value = c.r;
@@ -127,6 +138,9 @@ export function createBookSphereScene(
     params.red = c.r;
     params.green = c.g;
     params.blue = c.b;
+    colorTarget.r = c.r;
+    colorTarget.g = c.g;
+    colorTarget.b = c.b;
     colorsFolder.controllers.forEach((ctrl) => ctrl.updateDisplay());
   };
 
@@ -149,9 +163,29 @@ export function createBookSphereScene(
     camera.position.y += (-mouseY - camera.position.y) * 0.05;
     camera.lookAt(scene.position);
 
-    uniforms.u_time.value = clock.getElapsedTime();
-    if (analyser) {
+    const elapsed = clock.getElapsedTime();
+    uniforms.u_time.value = elapsed;
+    // When there is no decoded track yet (or nothing playing), still nudge the blob so the preview feels alive.
+    if (analyser && sound.buffer && sound.isPlaying) {
       uniforms.u_frequency.value = analyser.getAverageFrequency();
+
+      // First time after Play: short delay, then repeat on a random interval so colours keep shifting.
+      if (!playColorShufflePrimed) {
+        playColorShufflePrimed = true;
+        nextColorShuffleAt = elapsed + 1.8;
+      }
+      if (elapsed >= nextColorShuffleAt) {
+        pickRandomWireframeTarget();
+        nextColorShuffleAt = elapsed + 1.5 + Math.random() * 2.5;
+      }
+      const k = 0.042;
+      uniforms.u_red.value += (colorTarget.r - uniforms.u_red.value) * k;
+      uniforms.u_green.value += (colorTarget.g - uniforms.u_green.value) * k;
+      uniforms.u_blue.value += (colorTarget.b - uniforms.u_blue.value) * k;
+    } else {
+      playColorShufflePrimed = false;
+      const idle = (Math.sin(elapsed * 1.8) * 0.5 + 0.5) * 45;
+      uniforms.u_frequency.value = idle;
     }
 
     bloomComposer.render();
