@@ -32,7 +32,7 @@ const audioCache = new Map<
 >();
 
 // Bump when GPT/Open Library shaping changes so cached audio isn’t stale vs new prompts.
-const PROMPT_VERSION = '2';
+const PROMPT_VERSION = '3';
 
 type GptResult = {
   ambientPrompt: string;
@@ -77,17 +77,37 @@ type OlSearchDoc = {
   first_publish_year?: number;
 };
 
-function fallbackPrompt(title: string, wantLyrics: boolean): GptResult {
+/**
+ * When GPT is off, we still fold **intensity** into the plain-text ElevenLabs prompt so the slider always does something.
+ * 0 = very subtle; 100 = boldest interpretation that stays listenable as reading music.
+ */
+function fallbackPrompt(title: string, wantLyrics: boolean, intensity: number): GptResult {
+  const i = clamp01(intensity / 100);
+  // Short phrase so the model (and you) see how “loud” the creative direction is — keeps copy under ElevenLabs’ comfort zone.
+  let energy: string;
+  if (i <= 0.25) {
+    energy =
+      'Very soft dynamics, minimal layers, whisper-quiet atmosphere — almost imperceptible movement.';
+  } else if (i <= 0.5) {
+    energy = 'Gentle, balanced energy: clear mood without busy layers or sharp contrasts.';
+  } else if (i <= 0.75) {
+    energy =
+      'Expressive and vivid: wider dynamics, richer textures, stronger emotional color — still focused, not chaotic.';
+  } else {
+    energy =
+      'Bold and dramatic: strong contrasts, adventurous timbres, intense emotional peaks — still suitable as reading music, not harsh noise.';
+  }
+
   if (wantLyrics) {
     return {
-      ambientPrompt: `Ambient reading music inspired by "${title}". Soft, sparse vocals with gentle original lyrics about mood and atmosphere only — never quote the book. Calm, spacious, suitable for focus.`,
-      moodTags: ['calm', 'reading', 'ambient', 'vocals'],
+      ambientPrompt: `Ambient reading music inspired by "${title}". ${energy} Soft, sparse vocals with original lyrics about mood only — never quote the book.`,
+      moodTags: ['calm', 'reading', 'ambient', 'vocals', i > 0.65 ? 'intense' : 'soft'],
       suggestedWireframeColor: { r: 0.65, g: 0.55, b: 0.95 },
     };
   }
   return {
-    ambientPrompt: `Instrumental ambient reading music inspired by the book "${title}". Calm, spacious, minimal percussion, no vocals, suitable for deep focus while reading.`,
-    moodTags: ['calm', 'reading', 'ambient'],
+    ambientPrompt: `Instrumental ambient reading music inspired by the book "${title}". ${energy} No vocals, no lyrics.`,
+    moodTags: ['calm', 'reading', 'ambient', i > 0.65 ? 'dramatic' : 'soft'],
     suggestedWireframeColor: { r: 0.6, g: 0.75, b: 1.0 },
   };
 }
@@ -125,19 +145,40 @@ function buildGptUserContent(resolvedTitle: string, book: BookLookupResult): str
   return parts.join('\n');
 }
 
+/**
+ * Extra user-message block for GPT: tells the model how “wild” to go on dynamics, contrast, and texture.
+ * The slider sends 0–100; we describe bands so behavior is predictable.
+ */
+function buildIntensityInstructionBlock(intensity: number): string {
+  return [
+    `**Music intensity (0–100):** ${intensity}`,
+    'Interpret this as how extreme the sonic direction should be (not volume in the room):',
+    '- **0–25:** Subtle and restrained — sparse layers, soft dynamics, gentle motion; prioritize calm focus.',
+    '- **26–50:** Balanced — clear emotional color without busy arrangements or sharp jumps.',
+    '- **51–75:** Bold — wider dynamic range, richer layering, stronger contrasts and more vivid textures.',
+    '- **76–100:** Maximum expression — dramatic arcs, adventurous timbres, intense emotional peaks; still listenable as reading music (avoid abrasive noise, ear fatigue, or constant chaos).',
+    'Apply the intensity when you choose tempo, density, contrast, and how unusual the instrumentation gets.',
+  ].join('\n');
+}
+
 /** Optional: ask OpenAI for a richer prompt + RGB for the Three.js wireframe. */
 async function expandWithGpt(
   resolvedTitle: string,
   book: BookLookupResult,
   wantLyrics: boolean,
+  intensity: number,
 ): Promise<GptResult> {
-  if (!OPENAI_KEY) return fallbackPrompt(resolvedTitle, wantLyrics);
+  if (!OPENAI_KEY) return fallbackPrompt(resolvedTitle, wantLyrics, intensity);
 
   // System prompt: steer toward ElevenLabs-friendly language (texture, tempo, instruments) from *themes*, not title alone.
+  const intensityRule =
+    'The user message includes **Music intensity (0–100)**. You MUST follow it: low values stay subtle; high values push bolder dynamics, contrast, and more adventurous sonic extremes — always still suitable as background reading music.';
+
   const systemLyrics = wantLyrics
     ? [
         'You write a single text prompt for ElevenLabs Music (generative audio) for someone reading a book.',
         'Use the structured book facts (themes, synopsis, era). Turn abstract ideas into concrete sound: suggested instruments and layers, tempo/energy, emotional color, and atmosphere (e.g. intimate vs vast, warm vs cold).',
+        intensityRule,
         'Vocals allowed: very soft, sparse singing with short ORIGINAL lyrics that evoke mood only — never quote, name, or closely paraphrase the book’s wording.',
         'Do not claim an official soundtrack; avoid pasting the book title into the prompt as a marketing line.',
         'Return JSON only: ambientPrompt (one flowing string, max 450 characters), moodTags (3–6 short strings), suggestedWireframeColor: { r, g, b } each 0–1 matching the emotional palette.',
@@ -145,6 +186,7 @@ async function expandWithGpt(
     : [
         'You write a single text prompt for ElevenLabs Music (instrumental generative audio) for focused reading.',
         'Use themes, synopsis, and publication era from the user message. Translate themes (e.g. exile, nature, dread, wonder) into sonic choices: instrumentation, texture, tempo, space/reverb, and mood — not just “calm ambient.”',
+        intensityRule,
         'If the book’s ideas are tense, melancholic, or strange, the music may reflect that while staying listenable and not harsh (still suitable as reading music).',
         'No vocals, no lyrics, no copyrighted text, no quoting the book.',
         'Return JSON only: ambientPrompt (one flowing string, max 450 characters), moodTags (3–6 short strings), suggestedWireframeColor: { r, g, b } each 0–1 matching the emotional palette.',
@@ -166,7 +208,7 @@ async function expandWithGpt(
         },
         {
           role: 'user',
-          content: buildGptUserContent(resolvedTitle, book),
+          content: `${buildGptUserContent(resolvedTitle, book)}\n\n${buildIntensityInstructionBlock(intensity)}`,
         },
       ],
     }),
@@ -175,19 +217,19 @@ async function expandWithGpt(
   if (!res.ok) {
     const errText = await res.text();
     console.warn('OpenAI error, using fallback prompt:', res.status, errText);
-    return fallbackPrompt(resolvedTitle, wantLyrics);
+    return fallbackPrompt(resolvedTitle, wantLyrics, intensity);
   }
 
   const data = (await res.json()) as {
     choices?: Array<{ message?: { content?: string } }>;
   };
   const raw = data.choices?.[0]?.message?.content;
-  if (!raw) return fallbackPrompt(resolvedTitle, wantLyrics);
+  if (!raw) return fallbackPrompt(resolvedTitle, wantLyrics, intensity);
 
   try {
     const parsed = JSON.parse(raw) as GptResult;
     if (!parsed.ambientPrompt || typeof parsed.ambientPrompt !== 'string') {
-      return fallbackPrompt(resolvedTitle, wantLyrics);
+      return fallbackPrompt(resolvedTitle, wantLyrics, intensity);
     }
     const c = parsed.suggestedWireframeColor ?? { r: 0.6, g: 0.75, b: 1 };
     const trimmed = parsed.ambientPrompt.trim().slice(0, 450);
@@ -201,7 +243,7 @@ async function expandWithGpt(
       },
     };
   } catch {
-    return fallbackPrompt(resolvedTitle, wantLyrics);
+    return fallbackPrompt(resolvedTitle, wantLyrics, intensity);
   }
 }
 
@@ -408,10 +450,11 @@ function cacheKey(
   musicLengthMs: number,
   useGpt: boolean,
   wantLyrics: boolean,
+  intensity: number,
 ): string {
   const h = createHash('sha256');
   h.update(
-    `${PROMPT_VERSION}|${title.trim().toLowerCase()}|${musicLengthMs}|${useGpt ? 'gpt' : 'nogpt'}|${wantLyrics ? 'lyrics' : 'instr'}`,
+    `${PROMPT_VERSION}|${title.trim().toLowerCase()}|${musicLengthMs}|${useGpt ? 'gpt' : 'nogpt'}|${wantLyrics ? 'lyrics' : 'instr'}|intensity:${intensity}`,
   );
   return h.digest('hex');
 }
@@ -425,7 +468,7 @@ app.get('/api/health', (_req, res) => {
 });
 
 /**
- * Body: { title: string, musicLengthMs?: number, useGpt?: boolean, skipCache?: boolean, wantLyrics?: boolean }
+ * Body: { title: string, musicLengthMs?: number, useGpt?: boolean, skipCache?: boolean, wantLyrics?: boolean, intensity?: number }
  * Returns JSON: { audioBase64, mimeType, promptUsed, moodTags, uRed, uGreen, uBlue, book, cached? }
  * `book` comes from Open Library (real catalog lookup). Music still uses your title string if no match.
  */
@@ -451,8 +494,10 @@ app.post('/api/ambient', async (req, res) => {
     const skipCache = Boolean(req.body?.skipCache);
     // When false (default): instrumental only via ElevenLabs `force_instrumental`. When true: vocals/lyrics allowed.
     const wantLyrics = Boolean(req.body?.wantLyrics);
+    // 0 = subtle reading music; 100 = boldest GPT/ElevenLabs interpretation (see `buildIntensityInstructionBlock`).
+    const intensity = Math.min(100, Math.max(0, Math.round(Number(req.body?.intensity) || 50)));
 
-    const key = cacheKey(title, musicLengthMs, useGpt, wantLyrics);
+    const key = cacheKey(title, musicLengthMs, useGpt, wantLyrics, intensity);
     if (!skipCache && audioCache.has(key)) {
       const hit = audioCache.get(key)!;
       res.json({
@@ -470,8 +515,8 @@ app.post('/api/ambient', async (req, res) => {
     }
 
     const gpt = useGpt
-      ? await expandWithGpt(promptTitle, book, wantLyrics)
-      : fallbackPrompt(promptTitle, wantLyrics);
+      ? await expandWithGpt(promptTitle, book, wantLyrics, intensity)
+      : fallbackPrompt(promptTitle, wantLyrics, intensity);
     const promptUsed = gpt.ambientPrompt;
     const buf = await composeMusic(promptUsed, musicLengthMs, !wantLyrics);
     const audioBase64 = Buffer.from(buf).toString('base64');

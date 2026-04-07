@@ -53,6 +53,8 @@ const CONTROL_HINTS = {
   visualizer: '3D look only; same audio, no new generation.',
   // When off, the server asks ElevenLabs for instrumental-only; when on, prompts include original lyrics/vocals.
   wantLyrics: 'Off: instrumental only. On: generate music with lyrics.',
+  /** 0 = very subtle; 100 = boldest dynamics and sonic extremes in the GPT prompt (and fallback text). */
+  intensity: 'How extreme the music direction is: soft vs dramatic layers and contrast.',
   useGpt: 'Richer prompt from catalog; off uses title only.',
   skipCache: 'Ignore cache; pay for a new track.',
   generate: 'Generate music from your book and settings.',
@@ -107,6 +109,11 @@ function App() {
    * (see server `wantLyrics` → ElevenLabs prompt + `force_instrumental`).
    */
   const [wantLyrics, setWantLyrics] = useState(false);
+  /**
+   * 0–100: sent to the server as `intensity`. Low = gentle, sparse GPT/ElevenLabs direction; high = bolder contrasts
+   * and more adventurous textures (still framed as reading music).
+   */
+  const [intensity, setIntensity] = useState(50);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ambient, setAmbient] = useState<
@@ -222,6 +229,7 @@ function App() {
           useGpt,
           skipCache,
           wantLyrics,
+          intensity,
         }),
       });
 
@@ -321,6 +329,33 @@ function App() {
             <option value="blob">Wireframe blob (original)</option>
             <option value="kekkorider">Particles + bloom (kekkorider-style)</option>
           </select>
+        </div>
+
+        {/*
+          Range input: same pattern as other controls — `id` links label to slider for clicks and screen readers.
+          `aria-valuetext` gives a friendlier announcement than a raw number in some assistive setups.
+        */}
+        <div className="intensity-block" title={CONTROL_HINTS.intensity}>
+          <div className="intensity-block__header">
+            <label htmlFor="intensity">Intensity</label>
+            <span className="intensity-block__value" aria-live="polite">
+              {intensity}
+            </span>
+          </div>
+          <input
+            id="intensity"
+            type="range"
+            min={0}
+            max={100}
+            step={1}
+            value={intensity}
+            onChange={(e) => setIntensity(Number(e.target.value))}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={intensity}
+            aria-valuetext={`Intensity ${intensity} out of 100`}
+          />
+          <p className="intensity-block__hint">Lower = subtle; higher = more extreme dynamics and texture in the prompt.</p>
         </div>
 
         <SwitchRow
@@ -447,7 +482,7 @@ function App() {
                   <strong>Mood tags</strong>: {ambient.moodTags.join(', ')}
                 </p>
               )}
-              {ambient.cached && <p>Loaded from cache (same title + settings).</p>}
+              {ambient.cached && <p>Loaded from cache (same title, lyrics, GPT, and intensity).</p>}
             </div>
           </details>
         )}
