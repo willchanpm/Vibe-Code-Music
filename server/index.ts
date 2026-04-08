@@ -40,6 +40,15 @@ type GptResult = {
   suggestedWireframeColor: { r: number; g: number; b: number };
 };
 
+type IntensityProfile = {
+  bandLabel: string;
+  styleDirection: string;
+  instrumentationDirection: string;
+  rhythmDirection: string;
+  arrangementDirection: string;
+  moodTags: string[];
+};
+
 /** What we send to the client so you can see the app matched a real catalog entry (Open Library). */
 type BookLookupResult = {
   /** True when Open Library returned at least one search hit for your query. */
@@ -83,31 +92,21 @@ type OlSearchDoc = {
  */
 function fallbackPrompt(title: string, wantLyrics: boolean, intensity: number): GptResult {
   const i = clamp01(intensity / 100);
-  // Short phrase so the model (and you) see how “loud” the creative direction is — keeps copy under ElevenLabs’ comfort zone.
-  let energy: string;
-  if (i <= 0.25) {
-    energy =
-      'Very soft dynamics, minimal layers, whisper-quiet atmosphere — almost imperceptible movement.';
-  } else if (i <= 0.5) {
-    energy = 'Gentle, balanced energy: clear mood without busy layers or sharp contrasts.';
-  } else if (i <= 0.75) {
-    energy =
-      'Expressive and vivid: wider dynamics, richer textures, stronger emotional color — still focused, not chaotic.';
-  } else {
-    energy =
-      'Bold and dramatic: strong contrasts, adventurous timbres, intense emotional peaks — still suitable as reading music, not harsh noise.';
-  }
+  const profile = getIntensityProfile(intensity);
+  // Keep this fallback deterministic and explicit so turning GPT off still gives a strong intensity response.
+  const intensityDirection =
+    `${profile.styleDirection} ${profile.instrumentationDirection} ${profile.rhythmDirection} ${profile.arrangementDirection}`.trim();
 
   if (wantLyrics) {
     return {
-      ambientPrompt: `Ambient reading music inspired by "${title}". ${energy} Soft, sparse vocals with original lyrics about mood only — never quote the book.`,
-      moodTags: ['calm', 'reading', 'ambient', 'vocals', i > 0.65 ? 'intense' : 'soft'],
+      ambientPrompt: `Reading soundtrack inspired by "${title}". Intensity band ${profile.bandLabel}. ${intensityDirection} Keep vocals soft and sparse with short ORIGINAL lyrics about mood only. Never quote, name, or paraphrase the book text.`,
+      moodTags: [...profile.moodTags, 'reading', 'vocals', i > 0.65 ? 'intense' : 'subtle'],
       suggestedWireframeColor: { r: 0.65, g: 0.55, b: 0.95 },
     };
   }
   return {
-    ambientPrompt: `Instrumental ambient reading music inspired by the book "${title}". ${energy} No vocals, no lyrics.`,
-    moodTags: ['calm', 'reading', 'ambient', i > 0.65 ? 'dramatic' : 'soft'],
+    ambientPrompt: `Instrumental reading soundtrack inspired by the book "${title}". Intensity band ${profile.bandLabel}. ${intensityDirection} No vocals, no lyrics.`,
+    moodTags: [...profile.moodTags, 'reading', i > 0.65 ? 'dramatic' : 'soft'],
     suggestedWireframeColor: { r: 0.6, g: 0.75, b: 1.0 },
   };
 }
@@ -150,15 +149,81 @@ function buildGptUserContent(resolvedTitle: string, book: BookLookupResult): str
  * The slider sends 0–100; we describe bands so behavior is predictable.
  */
 function buildIntensityInstructionBlock(intensity: number): string {
+  const profile = getIntensityProfile(intensity);
   return [
     `**Music intensity (0–100):** ${intensity}`,
-    'Interpret this as how extreme the sonic direction should be (not volume in the room):',
-    '- **0–25:** Subtle and restrained — sparse layers, soft dynamics, gentle motion; prioritize calm focus.',
-    '- **26–50:** Balanced — clear emotional color without busy arrangements or sharp jumps.',
-    '- **51–75:** Bold — wider dynamic range, richer layering, stronger contrasts and more vivid textures.',
-    '- **76–100:** Maximum expression — dramatic arcs, adventurous timbres, intense emotional peaks; still listenable as reading music (avoid abrasive noise, ear fatigue, or constant chaos).',
-    'Apply the intensity when you choose tempo, density, contrast, and how unusual the instrumentation gets.',
+    'Interpret this as style pressure and arrangement boldness (not speaker volume):',
+    '- **0–25 (minimal chamber/drone):** restrained, sparse, mostly acoustic or warm analog textures, very slow movement.',
+    '- **26–50 (pulse-driven modern):** clearer groove and rhythm, tasteful electronic/acoustic blend, moderate motion.',
+    '- **51–75 (cinematic hybrid):** bigger contrasts, layered orchestral + synth palette, noticeable dramatic arcs.',
+    '- **76–100 (experimental dramatic):** adventurous timbres, irregular accents, bold transitions and thematic risk while still readable in the background.',
+    `Use this exact direction for this request: ${profile.bandLabel}.`,
+    `Style target: ${profile.styleDirection}`,
+    `Instrumentation target: ${profile.instrumentationDirection}`,
+    `Rhythm target: ${profile.rhythmDirection}`,
+    `Arrangement target: ${profile.arrangementDirection}`,
   ].join('\n');
+}
+
+/**
+ * Converts the numeric slider into a concrete composition profile.
+ * This is the "make the slider impactful" layer: style family, instruments, rhythm, and arrangement all shift by band.
+ */
+function getIntensityProfile(intensity: number): IntensityProfile {
+  if (intensity <= 25) {
+    return {
+      bandLabel: '0-25',
+      styleDirection:
+        'Lean toward minimal chamber / drone / neo-classical atmosphere rather than generic chill ambient.',
+      instrumentationDirection:
+        'Prefer felt piano, soft strings, low woodwinds, and gentle tape/analog pads with lots of negative space.',
+      rhythmDirection:
+        'Keep rhythm very subtle: almost arrhythmic or heartbeat-level pulse, no pronounced percussion.',
+      arrangementDirection:
+        'Use long phrases, low density, and tiny harmonic changes to sustain focus for reading.',
+      moodTags: ['minimal', 'chamber', 'drone'],
+    };
+  }
+  if (intensity <= 50) {
+    return {
+      bandLabel: '26-50',
+      styleDirection:
+        'Lean toward pulse-driven modern soundtrack with clear movement while staying controlled and readable.',
+      instrumentationDirection:
+        'Blend muted synth bass, soft mallets/plucks, warm pads, and light acoustic textures.',
+      rhythmDirection:
+        'Introduce a steady but unobtrusive pulse (subtle kick, brushed percussion, or arpeggiated motion).',
+      arrangementDirection:
+        'Build in sections with gentle rises and falls so scenes feel alive without becoming busy.',
+      moodTags: ['pulse', 'modern', 'focused'],
+    };
+  }
+  if (intensity <= 75) {
+    return {
+      bandLabel: '51-75',
+      styleDirection:
+        'Lean toward cinematic hybrid scoring with stronger thematic identity and wider emotional contrast.',
+      instrumentationDirection:
+        'Use hybrid orchestral textures (strings/brass beds) with synth layers, deep low-end, and expressive leads.',
+      rhythmDirection:
+        'Allow assertive rhythmic patterns and syncopation, but keep transients smooth enough for reading.',
+      arrangementDirection:
+        'Create clear arcs (setup, lift, release) and richer counter-layers that mirror the book themes.',
+      moodTags: ['cinematic', 'hybrid', 'dramatic'],
+    };
+  }
+  return {
+    bandLabel: '76-100',
+    styleDirection:
+      'Lean toward experimental dramatic scoring with bold character, unusual textures, and high thematic contrast.',
+    instrumentationDirection:
+      'Use adventurous timbres (prepared piano, granular/spectral synth colors, distorted organic textures) in a curated way.',
+    rhythmDirection:
+      'Permit irregular rhythmic accents, metric ambiguity, and sharp dynamic punctuation without constant chaos.',
+    arrangementDirection:
+      'Write pronounced tension-release arcs and striking transitions; keep it listenable, not abrasive.',
+    moodTags: ['experimental', 'theatrical', 'high-contrast'],
+  };
 }
 
 /** Optional: ask OpenAI for a richer prompt + RGB for the Three.js wireframe. */
@@ -172,13 +237,14 @@ async function expandWithGpt(
 
   // System prompt: steer toward ElevenLabs-friendly language (texture, tempo, instruments) from *themes*, not title alone.
   const intensityRule =
-    'The user message includes **Music intensity (0–100)**. You MUST follow it: low values stay subtle; high values push bolder dynamics, contrast, and more adventurous sonic extremes — always still suitable as background reading music.';
+    'The user message includes **Music intensity (0–100)** and a style-profile block. You MUST follow it: low values stay restrained, high values shift to bolder style families, stronger contrast, and more adventurous timbres — always still suitable as background reading music.';
 
   const systemLyrics = wantLyrics
     ? [
         'You write a single text prompt for ElevenLabs Music (generative audio) for someone reading a book.',
         'Use the structured book facts (themes, synopsis, era). Turn abstract ideas into concrete sound: suggested instruments and layers, tempo/energy, emotional color, and atmosphere (e.g. intimate vs vast, warm vs cold).',
         intensityRule,
+        'Do not default to generic "chill ambient." Match the requested intensity band and pick a style family that serves the book themes.',
         'Vocals allowed: very soft, sparse singing with short ORIGINAL lyrics that evoke mood only — never quote, name, or closely paraphrase the book’s wording.',
         'Do not claim an official soundtrack; avoid pasting the book title into the prompt as a marketing line.',
         'Return JSON only: ambientPrompt (one flowing string, max 450 characters), moodTags (3–6 short strings), suggestedWireframeColor: { r, g, b } each 0–1 matching the emotional palette.',
@@ -187,6 +253,7 @@ async function expandWithGpt(
         'You write a single text prompt for ElevenLabs Music (instrumental generative audio) for focused reading.',
         'Use themes, synopsis, and publication era from the user message. Translate themes (e.g. exile, nature, dread, wonder) into sonic choices: instrumentation, texture, tempo, space/reverb, and mood — not just “calm ambient.”',
         intensityRule,
+        'Do not over-index on chill ambience at every intensity; style should noticeably shift across bands while remaining readable.',
         'If the book’s ideas are tense, melancholic, or strange, the music may reflect that while staying listenable and not harsh (still suitable as reading music).',
         'No vocals, no lyrics, no copyrighted text, no quoting the book.',
         'Return JSON only: ambientPrompt (one flowing string, max 450 characters), moodTags (3–6 short strings), suggestedWireframeColor: { r, g, b } each 0–1 matching the emotional palette.',
